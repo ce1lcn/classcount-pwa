@@ -53,7 +53,12 @@ function pageFor(tab) {
 
 function render() {
   const main = document.getElementById('main');
-  const keep = renderedTab === ctx.tab ? main.scrollTop : 0;
+  // 只有「切换了标签」才播放进入动画；数据刷新、每分钟重绘都不播，避免闪烁
+  const entering = renderedTab !== ctx.tab;
+  const fromIndex = TABS.findIndex(([key]) => key === renderedTab);
+  const toIndex = TABS.findIndex(([key]) => key === ctx.tab);
+  ctx.entering = entering;
+  const keep = entering ? 0 : main.scrollTop;
   let page;
   try {
     page = pageFor(ctx.tab);
@@ -63,6 +68,12 @@ function render() {
       h('div', { class: 'banner error' }, `页面出错了：${err.message}`),
       h('button', { class: 'btn block', onClick: () => ctx.setTab('data') }, '去「数据」页导出备份'));
   }
+  if (entering) {
+    page.classList.add('enter');
+    if (fromIndex >= 0) {
+      page.classList.add(toIndex > fromIndex ? 'from-right' : 'from-left');
+    }
+  }
   const problems = ctx.tab === 'data' ? [] : ctx.store.problems();
   const parts = [];
   if (problems.length > 0) {
@@ -70,16 +81,24 @@ function render() {
       h('div', { class: 'banner error' }, '有数据读取异常，已阻止覆盖保存。请到「数据」页处理。')));
   }
   parts.push(page);
+  main.classList.toggle('fit', page.classList.contains('fit'));
   main.replaceChildren(...parts);
   main.scrollTop = keep;
   renderedTab = ctx.tab;
-  renderTabs();
+  renderTabs(entering);
 }
 
-function renderTabs() {
-  document.getElementById('tabs').replaceChildren(...TABS.map(([key, label, icon]) => h('button', {
-    class: 'tab', 'aria-current': ctx.tab === key ? 'page' : null, onClick: () => ctx.setTab(key)
-  }, svg(icon), label)));
+function renderTabs(pop) {
+  document.getElementById('tabs').replaceChildren(...TABS.map(([key, label, icon]) => {
+    const current = ctx.tab === key;
+    const button = h('button', {
+      class: 'tab', 'aria-current': current ? 'page' : null, onClick: () => ctx.setTab(key)
+    }, svg(icon), label);
+    if (current && pop) {
+      button.classList.add('pop');
+    }
+    return button;
+  }));
 }
 
 function guarded(write, message, rerender = true) {

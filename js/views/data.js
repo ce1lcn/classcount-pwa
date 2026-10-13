@@ -4,6 +4,7 @@ import { VERSION } from '../version.js';
 import { toDateKey } from '../logic/course.js';
 import { buildBackup, parseBackup, importCourseText, BACKUP_FORMAT } from '../store.js';
 import { openTermStartEditor } from './courses.js';
+import { showSegment } from './planner.js';
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 
@@ -153,6 +154,12 @@ async function copyBackup() {
   }
 }
 
+/** 可点击的数据行：点一下跳到对应页面 */
+function jumpRow(label, value, go) {
+  return h('button', { class: 'kv kv-link', onClick: go, 'aria-label': `${label}：${value}，点击查看` },
+    h('span', null, label), h('span', null, value));
+}
+
 // ---------------------------------------------------------------- 诊断
 
 function isStandalone() {
@@ -195,12 +202,12 @@ export function renderData(extra) {
 
     h('div', { class: 'section-title' }, h('span', null, '当前数据')),
     h('div', { class: 'card' },
-      h('div', { class: 'kv' }, h('span', null, '课表'), h('span', null, t.items.length > 0 ? `${t.items.length} 个课程格` : '未导入')),
+      jumpRow('课表', t.items.length > 0 ? `${t.items.length} 个课程格` : '未导入', () => ctx.setTab('courses')),
       h('div', { class: 'kv' }, h('span', null, '开学日（第 1 周周一）'),
         h('span', null, t.termStart > 0 ? toDateKey(t.termStart) : '未设置')),
-      h('div', { class: 'kv' }, h('span', null, '日程'), h('span', null, `${ctx.state.schedules.length} 个`)),
-      h('div', { class: 'kv' }, h('span', null, '待办'), h('span', null, `${plan.todos.length} 个`)),
-      h('div', { class: 'kv' }, h('span', null, '日记'), h('span', null, `${plan.diaries.filter((d) => d.body.trim().length > 0).length} 篇`)),
+      jumpRow('日程', `${ctx.state.schedules.length} 个`, () => showSegment('schedule')),
+      jumpRow('待办', `${plan.todos.length} 个`, () => showSegment('todo')),
+      jumpRow('日记', `${plan.diaries.filter((d) => d.body.trim().length > 0).length} 篇`, () => showSegment('diary')),
       h('div', { style: { marginTop: '10px' } },
         h('button', { class: 'btn small', onClick: openTermStartEditor }, '设置开学日'))),
 

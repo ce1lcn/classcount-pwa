@@ -10,6 +10,8 @@ export const ctx = {
   tab: 'today',
   /** 存储是否退化为仅内存（隐私模式等），数据页会提示 */
   memoryOnly: false,
+  /** 本次渲染是否是「切换标签」后的首次渲染（视图据此决定是否播放进入动画） */
+  entering: false,
   setTab: () => {},
   rerender: () => {},
   commitCourse: () => false,

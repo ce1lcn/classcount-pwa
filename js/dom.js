@@ -20,7 +20,7 @@ export function h(tag, props, ...kids) {
       el.className = v;
     } else if (key === 'style' && typeof v === 'object') {
       for (const name of Object.keys(v)) {
-        if (name.startsWith('--')) {
+        if (name.includes('-')) {
           el.style.setProperty(name, v[name]);
         } else {
           el.style[name] = v[name];
@@ -105,22 +105,74 @@ function closeLayer(node) {
  */
 export function openSheet({ title, body, foot, onRequestClose }) {
   const scrim = h('div', { class: 'scrim' });
-  const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': title });
+  const grabber = h('div', { class: 'grabber', 'aria-hidden': 'true' });
+  const head = h('div', { class: 'sheet-head' },
+    h('h2', null, title),
+    h('button', { class: 'icon-btn', 'aria-label': '关闭', onClick: () => request() }, '×'));
+  const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': title }, grabber, head);
   const wrapper = h('div', { style: { position: 'absolute', inset: '0' } }, scrim, sheet);
-  const close = () => closeLayer(wrapper);
+  let closing = false;
+  // 先播收起动画再移除节点；动画被系统关闭时也靠定时器兜底移除
+  const close = () => {
+    if (closing) {
+      return;
+    }
+    closing = true;
+    wrapper.classList.add('closing');
+    setTimeout(() => closeLayer(wrapper), 190);
+  };
   const request = async () => {
+    if (closing) {
+      return true;
+    }
     if (onRequestClose) {
       const ok = await onRequestClose();
       if (ok === false) {
-        return;
+        return false;
       }
     }
     close();
+    return true;
   };
   scrim.addEventListener('click', request);
-  sheet.appendChild(h('div', { class: 'sheet-head' },
-    h('h2', null, title),
-    h('button', { class: 'icon-btn', 'aria-label': '关闭', onClick: request }, '×')));
+
+  // 抓住顶部把手或标题栏向下拖，超过一定距离就关闭；不够就弹回
+  let startY = null;
+  let dy = 0;
+  const begin = (e) => {
+    startY = e.touches[0].clientY;
+    dy = 0;
+    sheet.style.transition = 'none';
+  };
+  const move = (e) => {
+    if (startY === null) {
+      return;
+    }
+    dy = Math.max(0, e.touches[0].clientY - startY);
+    sheet.style.transform = `translateY(${dy}px)`;
+    scrim.style.opacity = String(Math.max(0.2, 1 - dy / 500));
+  };
+  const end = async () => {
+    if (startY === null) {
+      return;
+    }
+    startY = null;
+    sheet.style.transition = 'transform .2s ease-out';
+    scrim.style.opacity = '';
+    if (dy > 90) {
+      if (await request()) {
+        return;
+      }
+    }
+    sheet.style.transform = '';
+  };
+  for (const part of [grabber, head]) {
+    part.addEventListener('touchstart', begin, { passive: true });
+    part.addEventListener('touchmove', move, { passive: true });
+    part.addEventListener('touchend', end);
+    part.addEventListener('touchcancel', end);
+  }
+
   sheet.appendChild(h('div', { class: 'sheet-body' }, body));
   if (foot) {
     sheet.appendChild(h('div', { class: 'sheet-foot' }, foot));
@@ -129,12 +181,35 @@ export function openSheet({ title, body, foot, onRequestClose }) {
   return { el: sheet, close, request };
 }
 
+/** 数字从 0 滚动到 target（倒计时天数等小动效）。动画被关闭或元素已移除时直接落到终值 */
+export function countUp(el, target, ms = 600) {
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !Number.isFinite(target) || target <= 0) {
+    el.textContent = String(target);
+    return;
+  }
+  const t0 = performance.now();
+  const step = (now) => {
+    const p = Math.min(1, (now - t0) / ms);
+    const eased = 1 - Math.pow(1 - p, 3);
+    el.textContent = String(Math.round(target * eased));
+    if (p < 1 && el.isConnected !== false) {
+      requestAnimationFrame(step);
+    } else {
+      el.textContent = String(target);
+    }
+  };
+  el.textContent = '0';
+  requestAnimationFrame(step);
+}
+
 /** 居中确认框，返回 Promise<boolean> */
 export function confirmDialog({ title, message, okText = '确定', danger = false }) {
   return new Promise((resolve) => {
     const scrim = h('div', { class: 'scrim' });
     const done = (value) => {
-      closeLayer(wrapper);
+      wrapper.classList.add('closing');
+      setTimeout(() => closeLayer(wrapper), 160);
       resolve(value);
     };
     const dialog = h('div', { class: 'dialog', role: 'alertdialog', 'aria-modal': 'true' },

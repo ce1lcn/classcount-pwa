@@ -1,4 +1,4 @@
-import { h, openSheet, confirmDialog, urgencyColor } from '../dom.js';
+import { h, svg, ICONS, openSheet, confirmDialog, urgencyColor } from '../dom.js';
 import { ctx, uid } from '../ctx.js';
 import { Schedule, calcDaysLeft, startOfDay } from '../logic/schedule.js';
 import {
@@ -21,12 +21,56 @@ const ui = {
 
 // ---------------------------------------------------------------- 待办操作
 
-export function completeTodo(todo) {
-  const next = clonePlanner(ctx.state.planner);
-  const today = dayOf(new Date());
-  if (completeTodoLogic(next, todo.id, today)) {
-    ctx.commitPlanner(next, '已完成，记录已保存在历史中');
+/** 从其他页面直接跳到手账的某个分段 */
+export function showSegment(seg) {
+  ui.seg = seg;
+  if (ctx.tab === 'planner') {
+    ctx.rerender();
+  } else {
+    ctx.setTab('planner');
   }
+}
+
+/**
+ * 完成待办。传入行元素时先播放「打勾 → 滑出」动画，再落盘；
+ * 落盘失败要把行恢复原样，否则这一行会一直处于透明状态。
+ */
+export function completeTodo(todo, rowEl) {
+  const run = () => {
+    const next = clonePlanner(ctx.state.planner);
+    const today = dayOf(new Date());
+    let ok = false;
+    if (completeTodoLogic(next, todo.id, today)) {
+      const left = pendingTodos(next, today, false).length;
+      ok = ctx.commitPlanner(next, left === 0 ? '今天的待办全部完成，辛苦了' : '已完成，记录已保存在历史中');
+    }
+    if (!ok && rowEl) {
+      rowEl.classList.remove('completing');
+    }
+  };
+  if (!rowEl) {
+    run();
+    return;
+  }
+  if (rowEl.classList.contains('completing')) {
+    return;
+  }
+  rowEl.classList.add('completing');
+  setTimeout(run, 380);
+}
+
+/** 日期输入下方的快捷按钮：offsets 里每项 [文字, 距今天的天数] */
+function quickDateChips(offsets, apply) {
+  const today = dayOf(new Date());
+  return h('div', { class: 'chips quick' }, offsets.map(([label, days]) => h('button', {
+    class: 'chip ghost', type: 'button', onClick: () => apply(dayLabel(today + days))
+  }, label)));
+}
+
+/** 距离下一个周一还有几天（今天是周一则为 7） */
+function daysToNextMonday() {
+  const weekday = ((dayOf(new Date()) + 3) % 7 + 7) % 7 + 1;
+  return 8 - weekday;
 }
 
 async function removeTodo(todo) {
@@ -97,7 +141,9 @@ export function openTodoEditor(todo) {
         h('input', {
           class: 'input', type: 'date', value: v.date,
           onInput: (e) => { v.date = e.target.value; }
-        }))].filter((node) => node !== null));
+        }),
+        quickDateChips([['今天', 0], ['明天', 1], ['后天', 2], ['下周一', daysToNextMonday()]],
+          (label) => { v.date = label; renderDynamic(); }))].filter((node) => node !== null));
   };
   renderDynamic();
 
@@ -180,6 +226,9 @@ export function openScheduleEditor(item) {
     class: 'textarea', maxlength: '500', placeholder: '备注（选填）', onInput: (e) => { v.note = e.target.value; }
   });
   noteInput.value = v.note;
+  const dateInput = h('input', {
+    class: 'input', type: 'date', value: v.date, onInput: (e) => { v.date = e.target.value; }
+  });
 
   const sheet = openSheet({
     title: item ? '编辑日程' : '新增日程',
@@ -189,8 +238,11 @@ export function openScheduleEditor(item) {
           class: 'input', type: 'text', maxlength: '40', placeholder: '如：期末考试', value: v.title,
           onInput: (e) => { v.title = e.target.value; }
         })),
-      h('div', { class: 'field' }, h('label', null, '目标日期'),
-        h('input', { class: 'input', type: 'date', value: v.date, onInput: (e) => { v.date = e.target.value; } })),
+      h('div', { class: 'field' }, h('label', null, '目标日期'), dateInput,
+        quickDateChips([['一周后', 7], ['两周后', 14], ['一个月后', 30], ['两个月后', 60]], (label) => {
+          v.date = label;
+          dateInput.value = label;
+        })),
       h('div', { class: 'field' }, h('label', null, '备注'), noteInput),
       errorBox
     ],
@@ -299,17 +351,18 @@ function dueLabel(todo, today) {
 
 function todoCard(todo, today) {
   const actionable = todo.nextDay <= today;
-  return h('div', { class: 'card todo' },
+  const row = h('div', { class: 'card todo' },
     h('button', {
       class: `check${actionable ? '' : ' disabled'}`, 'aria-label': `完成：${todo.title}`,
-      disabled: !actionable, onClick: () => completeTodo(todo)
-    }),
+      disabled: !actionable, onClick: () => completeTodo(todo, row)
+    }, svg(ICONS.check, 16)),
     h('button', { class: 'row-btn grow', onClick: () => openTodoEditor(todo) },
       h('div', { class: 'title' }, todo.title),
       todo.note.length > 0 ? h('div', { class: 'muted small ellipsis' }, todo.note) : null,
       h('div', { class: `due${todo.nextDay < today ? ' late' : ''}` },
         h('span', { class: 'stars' }, starsText(todo.stars)), ` · ${ruleLabel(todo)}`),
       h('div', { class: `due${todo.nextDay < today ? ' late' : ''}` }, dueLabel(todo, today))));
+  return row;
 }
 
 function todoSegment(today) {

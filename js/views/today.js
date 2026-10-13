@@ -4,7 +4,7 @@ import {
   calcNextClass, todayClasses, weekOfTerm, sectionStartTime, sectionEndTime
 } from '../logic/course.js';
 import { calcDaysLeft, calcProgressPercent } from '../logic/schedule.js';
-import { pendingTodos, starsText, dayOf } from '../logic/planner.js';
+import { pendingTodos, starsText, dayOf, dayLabel } from '../logic/planner.js';
 import { openScheduleEditor, completeTodo, openTodoEditor } from './planner.js';
 
 const WEEK_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
@@ -88,7 +88,6 @@ function scheduleCards(now) {
   return list.map((item) => {
     const left = calcDaysLeft(item.targetDate, now);
     const percent = calcProgressPercent(item.createdDate, item.targetDate, now);
-    const d = new Date(item.targetDate);
     const text = left > 0 ? `${left}` : (left === 0 ? '今天' : `${-left}`);
     const unit = left > 0 ? '天' : (left === 0 ? '' : '天前');
     return h('button', {
@@ -97,7 +96,7 @@ function scheduleCards(now) {
     h('div', { class: 'sched', style: { background: urgencyColor(left) } },
       h('div', { class: 'grow' },
         h('div', { class: 'title ellipsis' }, item.title),
-        h('div', { class: 'date' }, `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`),
+        h('div', { class: 'date' }, dayLabel(dayOf(new Date(item.targetDate)))),
         h('div', { class: 'progress' }, h('i', { style: { width: `${percent}%` } }))),
       h('div', { class: 'days' }, h('b', null, text), h('span', null, unit))));
   });

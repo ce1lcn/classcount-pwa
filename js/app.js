@@ -191,18 +191,20 @@ function boot() {
   render();
   startClock();
 
-  // iOS 弹出键盘时布局视口不变，只有可视视口缩小：让弹层层跟随可视视口，输入框不被键盘遮住
-  if (window.visualViewport) {
-    const layer = document.getElementById('layer');
-    const fit = () => {
-      const vv = window.visualViewport;
-      layer.style.height = `${vv.height}px`;
-      layer.style.top = `${vv.offsetTop}px`;
-      layer.style.bottom = 'auto';
-    };
-    window.visualViewport.addEventListener('resize', fit);
-    window.visualViewport.addEventListener('scroll', fit);
-  }
+  // 键盘收起后 iOS 有时会把整个页面留在被顶起的位置，失焦时复位
+  document.addEventListener('focusout', () => {
+    setTimeout(() => window.scrollTo(0, 0), 60);
+  });
+  // 切到后台或被系统回收前，把没点「保存」的日记落盘，避免丢字
+  const flushOnLeave = () => {
+    flushDiaryIfDirty();
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      flushOnLeave();
+    }
+  });
+  window.addEventListener('pagehide', flushOnLeave);
 
   window.addEventListener('error', (e) => toast(`出错了：${e.message}`, true));
   window.addEventListener('unhandledrejection', (e) => toast(`出错了：${e.reason && e.reason.message ? e.reason.message : e.reason}`, true));

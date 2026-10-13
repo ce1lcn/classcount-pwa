@@ -153,6 +153,30 @@ async function copyBackup() {
   }
 }
 
+// ---------------------------------------------------------------- 诊断
+
+function isStandalone() {
+  return window.navigator.standalone === true ||
+    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+}
+
+function diagnostics() {
+  const vv = window.visualViewport;
+  const probe = h('div', { style: { position: 'absolute', visibility: 'hidden', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' } });
+  document.body.appendChild(probe);
+  const cs = getComputedStyle(probe);
+  const safe = `${cs.paddingTop} / ${cs.paddingBottom}`;
+  probe.remove();
+  return [
+    `版本 ${VERSION}`,
+    `窗口 ${window.innerWidth}×${window.innerHeight}  屏幕 ${screen.width}×${screen.height}`,
+    vv ? `可视视口 ${Math.round(vv.width)}×${Math.round(vv.height)}  偏移 ${Math.round(vv.offsetTop)}  缩放 ${vv.scale}` : '无 visualViewport',
+    `安全区 上/下 ${safe}`,
+    `主屏幕模式 ${isStandalone() ? '是' : '否'}`,
+    `系统深色模式 ${window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? '是' : '否'}`
+  ].join('\n');
+}
+
 // ---------------------------------------------------------------- 视图
 
 export function renderData(extra) {
@@ -199,8 +223,13 @@ export function renderData(extra) {
     h('div', { class: 'section-title' }, h('span', null, '关于')),
     h('div', { class: 'card' },
       h('div', { class: 'kv' }, h('span', null, '版本'), h('span', null, VERSION)),
-      h('div', { class: 'kv' }, h('span', null, '数据保护'),
-        h('span', null, persisted === true ? '已申请持久存储' : (persisted === false ? '浏览器未授予持久存储' : '未知'))),
+      h('div', { class: 'kv' }, h('span', null, '运行方式'),
+        h('span', null, isStandalone() ? '主屏幕 App（数据不会被自动清理）' : '浏览器标签页（数据可能被清理，请添加到主屏幕）')),
+      h('div', { class: 'kv' }, h('span', null, '持久存储'),
+        h('span', null, persisted === true ? '已授予' : (persisted === false ? '未授予（iOS 常见，不影响主屏幕 App）' : '检测中'))),
+      h('details', { style: { marginTop: '8px' } },
+        h('summary', { class: 'muted small' }, '诊断信息（排查显示问题时用）'),
+        h('pre', { class: 'small muted', style: { whiteSpace: 'pre-wrap', margin: '6px 0 0' } }, diagnostics())),
       h('p', { class: 'hint' },
         '安装到主屏幕：在 Safari 点底部「分享」→「添加到主屏幕」。之后从桌面图标打开，会像普通 App 一样全屏运行，并可离线使用。')),
 

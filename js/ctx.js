@@ -12,6 +12,8 @@ export const ctx = {
   memoryOnly: false,
   /** 本次渲染是否是「切换标签」后的首次渲染（视图据此决定是否播放进入动画） */
   entering: false,
+  /** 当前页的悬浮按钮 { label, onClick }，由视图在渲染时设置，app.js 在页面外层绘制 */
+  fab: null,
   setTab: () => {},
   rerender: () => {},
   commitCourse: () => false,

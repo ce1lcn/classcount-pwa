@@ -93,6 +93,38 @@ export function toast(message, isError = false) {
 
 const layer = () => document.getElementById('layer');
 
+/**
+ * 弹层打开时让系统状态栏区域一起「变暗」。
+ * iOS 主屏幕 App 的状态栏背景由系统按页面背景色/theme-color 绘制，不在网页内容之内，遮罩盖不到；
+ * 所以在弹层存在期间把 theme-color 和根背景换成「米白叠 40% 遮罩」的颜色，收起后还原。
+ */
+const PAGE_BG = '#F6F1E9';
+const DIMMED_BG = '#A5A099';
+let openLayers = 0;
+
+function setChromeTint(dim) {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) {
+    meta.setAttribute('content', dim ? DIMMED_BG : PAGE_BG);
+  }
+  document.documentElement.style.backgroundColor = dim ? DIMMED_BG : '';
+  document.body.style.backgroundColor = dim ? DIMMED_BG : '';
+}
+
+function layerOpened() {
+  openLayers += 1;
+  if (openLayers === 1) {
+    setChromeTint(true);
+  }
+}
+
+function layerClosing() {
+  openLayers = Math.max(0, openLayers - 1);
+  if (openLayers === 0) {
+    setChromeTint(false);
+  }
+}
+
 function closeLayer(node) {
   if (node.parentNode !== null) {
     node.parentNode.removeChild(node);
@@ -118,6 +150,7 @@ export function openSheet({ title, body, foot, onRequestClose }) {
       return;
     }
     closing = true;
+    layerClosing();
     wrapper.classList.add('closing');
     setTimeout(() => closeLayer(wrapper), 190);
   };
@@ -178,6 +211,7 @@ export function openSheet({ title, body, foot, onRequestClose }) {
     sheet.appendChild(h('div', { class: 'sheet-foot' }, foot));
   }
   layer().appendChild(wrapper);
+  layerOpened();
   return { el: sheet, close, request };
 }
 
@@ -207,9 +241,14 @@ export function countUp(el, target, ms = 600) {
 export function confirmDialog({ title, message, okText = '确定', danger = false }) {
   return new Promise((resolve) => {
     const scrim = h('div', { class: 'scrim' });
+    let finished = false;
     const done = (value) => {
-      wrapper.classList.add('closing');
-      setTimeout(() => closeLayer(wrapper), 160);
+      if (!finished) {
+        finished = true;
+        layerClosing();
+        wrapper.classList.add('closing');
+        setTimeout(() => closeLayer(wrapper), 160);
+      }
       resolve(value);
     };
     const dialog = h('div', { class: 'dialog', role: 'alertdialog', 'aria-modal': 'true' },
@@ -221,6 +260,7 @@ export function confirmDialog({ title, message, okText = '确定', danger = fals
     const wrapper = h('div', { style: { position: 'absolute', inset: '0' } }, scrim, dialog);
     scrim.addEventListener('click', () => done(false));
     layer().appendChild(wrapper);
+    layerOpened();
   });
 }
 

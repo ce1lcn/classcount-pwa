@@ -16,6 +16,8 @@ const TABS = [
 
 let persisted = null;
 let renderedTab = '';
+let fabEl = null;
+let fabLabel = '';
 
 /** localStorage 在隐私模式等场景可能不可用，退化为仅内存并在数据页提示 */
 function createStorage() {
@@ -59,6 +61,7 @@ function render() {
   const toIndex = TABS.findIndex(([key]) => key === ctx.tab);
   ctx.entering = entering;
   const keep = entering ? 0 : main.scrollTop;
+  ctx.fab = null;
   let page;
   try {
     page = pageFor(ctx.tab);
@@ -86,6 +89,25 @@ function render() {
   main.scrollTop = keep;
   renderedTab = ctx.tab;
   renderTabs(entering);
+  renderFab();
+}
+
+/** 悬浮按钮画在页面之外：页面进入动画带 transform，会改变 fixed 子元素的定位基准 */
+function renderFab() {
+  const spec = ctx.fab;
+  if (fabEl !== null) {
+    fabEl.remove();
+    fabEl = null;
+  }
+  if (spec === null) {
+    fabLabel = '';
+    return;
+  }
+  fabEl = h('button', {
+    class: `fab${fabLabel === spec.label ? '' : ' appear'}`, 'aria-label': spec.label, onClick: spec.onClick
+  }, '+');
+  fabLabel = spec.label;
+  document.getElementById('app').appendChild(fabEl);
 }
 
 function renderTabs(pop) {

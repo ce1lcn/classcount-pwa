@@ -366,6 +366,8 @@ function todoCard(todo, today) {
 }
 
 function todoSegment(today) {
+  // 悬浮按钮不放进页面（页面有转场 transform，会让 fixed 子元素先错位再跳回），交给 app.js 在外层渲染
+  ctx.fab = { label: '新增待办', onClick: () => openTodoEditor(null) };
   const data = ctx.state.planner;
   const due = pendingTodos(data, today, false);
   const future = pendingTodos(data, today, true);
@@ -376,12 +378,12 @@ function todoSegment(today) {
       h('span', null, `即将开始（${future.length}）`),
       h('button', { class: 'btn small', onClick: () => { ui.showFuture = !ui.showFuture; ctx.rerender(); } },
         ui.showFuture ? '收起' : '展开')) : null,
-    ui.showFuture ? h('div', { class: 'list' }, future.map((t) => todoCard(t, today))) : null,
-    h('button', { class: 'fab', 'aria-label': '新增待办', onClick: () => openTodoEditor(null) }, '+')
+    ui.showFuture ? h('div', { class: 'list' }, future.map((t) => todoCard(t, today))) : null
   ];
 }
 
 function scheduleSegment() {
+  ctx.fab = { label: '新增日程', onClick: () => openScheduleEditor(null) };
   const now = Date.now();
   const list = ctx.state.schedules.slice().sort((a, b) => a.targetDate - b.targetDate);
   return [
@@ -397,8 +399,7 @@ function scheduleSegment() {
             h('div', { class: 'due' }, dayLabel(dayOf(new Date(item.targetDate))))),
           h('div', { style: { textAlign: 'right', fontWeight: '700' } },
             left > 0 ? `${left} 天` : (left === 0 ? '今天' : `已过 ${-left} 天`))));
-    }) : [h('div', { class: 'card empty' }, '还没有日程')]),
-    h('button', { class: 'fab', 'aria-label': '新增日程', onClick: () => openScheduleEditor(null) }, '+')
+    }) : [h('div', { class: 'card empty' }, '还没有日程')])
   ];
 }
 

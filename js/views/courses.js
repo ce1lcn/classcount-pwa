@@ -193,7 +193,7 @@ export function renderCourses() {
       const many = cluster.items.length > 1;
       const hasMemo = cluster.items.some((it) => it.memo.length > 0 || (it.dayMemos[key] || '').length > 0);
       return h('button', {
-        class: `block${many ? ' multi' : ''}`,
+        class: `course-block${many ? ' multi' : ''}`,
         'aria-label': many ? `${cluster.items.length} 门课时间重叠` : `${first.name}，${first.room}，第${first.startSection}到${first.endSection}节`,
         style: {
           '--c': many ? '#7A7066' : courseColor(first.name),

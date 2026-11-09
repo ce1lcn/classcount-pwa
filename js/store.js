@@ -8,6 +8,7 @@
 import { CourseTable, CourseItem, parseKbJson, parseWeeks, startOfWeek } from './logic/course.js';
 import { Schedule } from './logic/schedule.js';
 import { PlannerData, decodePlanner } from './logic/planner.js';
+import { validateWeeklyNotes } from './planner-extra.js';
 
 export const KEYS = {
   course: 'classcount.course.v1',
@@ -212,7 +213,7 @@ export function parseBackup(text) {
   state.schedules = normalizeSchedules(root.schedules === undefined ? [] : root.schedules);
   state.activeId = str(root.activeId);
   if (root.planner !== undefined && root.planner !== null) {
-    state.planner = decodePlanner(JSON.stringify(root.planner));
+    state.planner = validateWeeklyNotes(decodePlanner(JSON.stringify(root.planner)));
   }
   return state;
 }
@@ -222,12 +223,14 @@ export class Store {
     this.storage = storage;
     /** key -> 读到损坏数据时的说明；有值的 key 拒绝写入 */
     this.corrupt = {};
+    this.snapshots = new Map();
   }
 
   readJson(key, fallback, check) {
     let raw = null;
     try {
       raw = this.storage.getItem(key);
+      this.snapshots.set(key, raw);
     } catch (err) {
       this.corrupt[key] = '浏览器存储不可用';
       return fallback;
@@ -245,11 +248,12 @@ export class Store {
 
   load() {
     this.corrupt = {};
+    this.snapshots.clear();
     const state = emptyState();
     state.course = this.readJson(KEYS.course, state.course, normalizeCourseTable);
     state.schedules = this.readJson(KEYS.schedules, state.schedules, normalizeSchedules);
     state.activeId = this.readJson(KEYS.active, '', (v) => str(v));
-    state.planner = this.readJson(KEYS.planner, state.planner, (v) => decodePlanner(JSON.stringify(v)));
+    state.planner = this.readJson(KEYS.planner, state.planner, (v) => validateWeeklyNotes(decodePlanner(JSON.stringify(v))));
     return state;
   }
 
@@ -257,19 +261,61 @@ export class Store {
     return Object.keys(this.corrupt).map((k) => `${k.split('.')[1]}：${this.corrupt[k]}`);
   }
 
-  write(key, value) {
-    if (this.corrupt[key] !== undefined) {
-      throw new Error('这部分数据读取时发现损坏，为避免覆盖已拒绝保存。请先在「数据」页导入备份或清除数据');
+  rawBackup() {
+    const entries = {};
+    for (const key of Object.values(KEYS)) entries[key] = this.storage.getItem(key);
+    return { format: 'classcount-raw-storage', version: 1, exportedAt: Date.now(), entries };
+  }
+
+  hasExternalChanges() {
+    return Object.values(KEYS).some((key) => this.snapshots.has(key) && this.storage.getItem(key) !== this.snapshots.get(key));
+  }
+
+  /** 先检查页面打开以来的数据，再写入；失败时还原所有尝试过的键。 */
+  writeMany(entries, allowCorrupt = false) {
+    const before = new Map();
+    for (const [key] of entries) {
+      if (!allowCorrupt && this.corrupt[key] !== undefined) {
+        throw new Error('这部分数据读取时发现损坏，为避免覆盖已拒绝保存。请先在「数据」页导入备份或清除数据');
+      }
+      let current;
+      try { current = this.storage.getItem(key); } catch (err) { throw new Error('保存失败：浏览器存储不可用'); }
+      if (this.snapshots.has(key) && this.snapshots.get(key) !== current) {
+        throw new Error('其他页面已更新数据，请先复制未保存内容，再刷新页面');
+      }
+      before.set(key, current);
     }
-    const raw = JSON.stringify(value);
+    const attempted = [];
     try {
-      this.storage.setItem(key, raw);
-      if (this.storage.getItem(key) !== raw) {
-        throw new Error('读回校验失败');
+      for (const [key, raw] of entries) {
+        attempted.push(key);
+        if (raw === null) this.storage.removeItem(key);
+        else this.storage.setItem(key, raw);
+        if (this.storage.getItem(key) !== raw) throw new Error('读回校验失败');
       }
     } catch (err) {
+      let failed = false;
+      for (const key of attempted.reverse()) {
+        try {
+          const old = before.get(key);
+          if (this.storage.getItem(key) !== old) {
+            if (old === null) this.storage.removeItem(key);
+            else this.storage.setItem(key, old);
+          }
+          if (this.storage.getItem(key) !== old) failed = true;
+        } catch (restoreError) { failed = true; }
+      }
+      if (failed) {
+        attempted.forEach((key) => { this.corrupt[key] = '保存失败且无法确认原数据已还原'; });
+        throw new Error('保存失败，且无法确认原数据已还原，请立即导出原始数据');
+      }
       throw new Error('保存失败：浏览器存储已满或不可用');
     }
+    for (const [key, raw] of entries) this.snapshots.set(key, raw);
+  }
+
+  write(key, value) {
+    this.writeMany([[key, JSON.stringify(value)]]);
   }
 
   saveCourse(table) {
@@ -277,8 +323,7 @@ export class Store {
   }
 
   saveSchedules(list, activeId) {
-    this.write(KEYS.schedules, list);
-    this.write(KEYS.active, activeId);
+    this.writeMany([[KEYS.schedules, JSON.stringify(list)], [KEYS.active, JSON.stringify(activeId)]]);
   }
 
   savePlanner(data) {
@@ -287,46 +332,17 @@ export class Store {
 
   /** 整体替换（导入备份）：先全部校验写入，任何一项失败则还原 */
   replaceAll(state) {
-    const entries = [
-      [KEYS.course, state.course],
-      [KEYS.schedules, state.schedules],
-      [KEYS.active, state.activeId],
-      [KEYS.planner, state.planner]
-    ];
-    const previous = new Map(entries.map(([k]) => [k, this.storage.getItem(k)]));
-    const wasCorrupt = this.corrupt;
-    const written = [];
-    try {
-      this.corrupt = {};
-      for (const [key, value] of entries) {
-        this.write(key, value);
-        written.push(key);
-      }
-    } catch (err) {
-      // 只还原已经成功写入的键；还原本身失败要如实告知，不能假装回到了原状
-      let restoreFailed = false;
-      for (const key of written) {
-        try {
-          const old = previous.get(key);
-          if (old === null) {
-            this.storage.removeItem(key);
-          } else {
-            this.storage.setItem(key, old);
-          }
-        } catch (restoreError) {
-          restoreFailed = true;
-        }
-      }
-      this.corrupt = wasCorrupt;
-      if (restoreFailed) {
-        throw new Error('导入失败，且无法还原原数据，请立刻导出备份并重新打开应用');
-      }
-      throw err;
-    }
+    this.writeMany([
+      [KEYS.course, JSON.stringify(state.course)],
+      [KEYS.schedules, JSON.stringify(state.schedules)],
+      [KEYS.active, JSON.stringify(state.activeId)],
+      [KEYS.planner, JSON.stringify(state.planner)]
+    ], true);
+    this.corrupt = {};
   }
 
   clearAll() {
-    Object.values(KEYS).forEach((k) => this.storage.removeItem(k));
+    this.writeMany(Object.values(KEYS).map((key) => [key, null]), true);
     this.corrupt = {};
   }
 }

@@ -18,6 +18,55 @@ let persisted = null;
 let renderedTab = '';
 let fabEl = null;
 let fabLabel = '';
+let sessionStatus = 'checking';
+let releaseSession = null;
+let sessionGeneration = 0;
+let sessionRequested = false;
+
+/** 前台页面持有写入锁，后台释放；旧页面写入仍由存储快照校验拦截。 */
+function acquireSession() {
+  if (sessionRequested || sessionStatus === 'ready') return;
+  if (ctx.memoryOnly || !navigator.locks || !navigator.locks.request) {
+    sessionStatus = ctx.memoryOnly ? 'ready' : 'unsupported';
+    return;
+  }
+  const generation = ++sessionGeneration;
+  sessionRequested = true;
+  sessionStatus = 'checking';
+  navigator.locks.request('classcount-write-session', { ifAvailable: true }, async (lock) => {
+    if (generation === sessionGeneration) sessionRequested = false;
+    if (generation !== sessionGeneration || document.visibilityState !== 'visible') return;
+    if (!lock) {
+      sessionStatus = 'busy';
+      render();
+      return;
+    }
+    sessionStatus = 'ready';
+    try {
+      const next = clonePlanner(ctx.state.planner);
+      if (reconcile(next, dayOf(new Date()))) {
+        ctx.store.savePlanner(next);
+        ctx.state.planner = next;
+      }
+    } catch (err) { toast(err.message, true); }
+    render();
+    await new Promise((resolve) => { releaseSession = resolve; });
+  }).catch(() => {
+    if (generation === sessionGeneration) { sessionRequested = false; sessionStatus = 'unsupported'; render(); }
+  });
+}
+
+function endSession() {
+  sessionGeneration += 1;
+  sessionRequested = false;
+  if (releaseSession) releaseSession();
+  releaseSession = null;
+  sessionStatus = 'checking';
+}
+
+function sessionCanWrite() {
+  return ctx.memoryOnly || sessionStatus === 'ready' || sessionStatus === 'unsupported';
+}
 
 /** localStorage 在隐私模式等场景可能不可用，退化为仅内存并在数据页提示 */
 function createStorage() {
@@ -79,6 +128,15 @@ function render() {
   }
   const problems = ctx.tab === 'data' ? [] : ctx.store.problems();
   const parts = [];
+  if (sessionStatus === 'busy') {
+    parts.push(h('div', { class: 'page' }, h('div', { class: 'banner error' }, '另一个页面正在编辑，请关闭其他页面后重新打开。')));
+  }
+  if (sessionStatus === 'unsupported' && !ctx.memoryOnly) {
+    parts.push(h('div', { class: 'page' }, h('div', { class: 'banner error' }, '此浏览器缺少多页面保护，请只打开一个页面。')));
+  }
+  if (ctx.memoryOnly && ctx.tab !== 'data') {
+    parts.push(h('div', { class: 'page' }, h('div', { class: 'banner error' }, '当前内容仅临时保存，关闭页面后会丢失，请及时导出备份。')));
+  }
   if (problems.length > 0) {
     parts.push(h('div', { class: 'page' },
       h('div', { class: 'banner error' }, '有数据读取异常，已阻止覆盖保存。请到「数据」页处理。')));
@@ -124,6 +182,10 @@ function renderTabs(pop) {
 }
 
 function guarded(write, message, rerender = true) {
+  if (!sessionCanWrite()) {
+    toast(sessionStatus === 'busy' ? '另一个页面正在编辑，请关闭其他页面后重新打开' : '正在准备存储，请稍后重试', true);
+    return false;
+  }
   try {
     write();
   } catch (err) {
@@ -131,7 +193,7 @@ function guarded(write, message, rerender = true) {
     return false;
   }
   if (message) {
-    toast(message);
+    toast(ctx.memoryOnly ? '仅临时保存，关闭页面后会丢失' : message, ctx.memoryOnly);
   }
   if (rerender) {
     render();
@@ -189,7 +251,7 @@ function startClock() {
     if (today !== lastDay) {
       lastDay = today;
       const next = clonePlanner(ctx.state.planner);
-      if (reconcile(next, today)) {
+      if (sessionCanWrite() && reconcile(next, today)) {
         try {
           ctx.store.savePlanner(next);
           ctx.state.planner = next;
@@ -222,8 +284,9 @@ function boot() {
   ctx.memoryOnly = memoryOnly;
   ctx.state = ctx.store.load();
   wire();
+  acquireSession();
   try {
-    if (reconcile(ctx.state.planner, dayOf(new Date()))) {
+    if (sessionCanWrite() && reconcile(ctx.state.planner, dayOf(new Date()))) {
       ctx.store.savePlanner(ctx.state.planner);
     }
   } catch (err) {
@@ -243,9 +306,13 @@ function boot() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       flushOnLeave();
+      endSession();
+    } else {
+      acquireSession();
     }
   });
-  window.addEventListener('pagehide', flushOnLeave);
+  window.addEventListener('pagehide', () => { flushOnLeave(); endSession(); });
+  window.addEventListener('pageshow', (event) => { if (event.persisted) acquireSession(); });
 
   window.addEventListener('error', (e) => toast(`出错了：${e.message}`, true));
   window.addEventListener('unhandledrejection', (e) => toast(`出错了：${e.reason && e.reason.message ? e.reason.message : e.reason}`, true));

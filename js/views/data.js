@@ -110,9 +110,7 @@ function openPasteSheet() {
 
 // ---------------------------------------------------------------- 导出
 
-async function exportFile() {
-  const text = JSON.stringify(buildBackup(ctx.state), null, 2);
-  const name = `ClassCount-备份-${stamp()}.json`;
+async function downloadText(text, name) {
   const file = new File([text], name, { type: 'application/json' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
@@ -136,7 +134,38 @@ async function exportFile() {
   toast('已生成备份文件');
 }
 
+function canExportBackup() {
+  try {
+    if (ctx.store.problems().length || ctx.store.hasExternalChanges()) {
+      toast('数据读取异常或已被其他页面更新，请导出原始数据', true);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    toast('无法读取存储，请勿关闭页面并尝试复制当前内容', true);
+    return false;
+  }
+}
+
+async function exportFile() {
+  if (!canExportBackup()) return;
+  await downloadText(JSON.stringify(buildBackup(ctx.state), null, 2), `ClassCount-备份-${stamp()}.json`);
+}
+
+async function exportRaw() {
+  if (ctx.memoryOnly) {
+    toast('当前无法读取设备上的原始存储', true);
+    return;
+  }
+  try {
+    await downloadText(JSON.stringify(ctx.store.rawBackup(), null, 2), `ClassCount-原始数据-${stamp()}.json`);
+  } catch (err) {
+    toast('无法读取原始数据，请勿关闭页面', true);
+  }
+}
+
 async function copyBackup() {
+  if (!canExportBackup()) return;
   const text = JSON.stringify(buildBackup(ctx.state));
   try {
     await navigator.clipboard.writeText(text);
@@ -225,7 +254,9 @@ export function renderData(extra) {
         '数据只保存在这台设备的浏览器里。换设备或清理 Safari 数据前，请先导出备份。'),
       h('div', { class: 'group' },
         h('button', { class: 'btn primary block', onClick: exportFile }, '导出备份文件'),
-        h('button', { class: 'btn block', onClick: copyBackup }, '复制备份内容'))),
+        h('button', { class: 'btn block', onClick: copyBackup }, '复制备份内容'),
+        h('button', { class: 'btn block', onClick: exportRaw }, '导出原始数据')),
+      h('p', { class: 'hint' }, '数据异常时可导出原始数据用于恢复；该文件不能直接作为普通备份导入。')),
 
     h('div', { class: 'section-title' }, h('span', null, '关于')),
     h('div', { class: 'card' },

@@ -5,6 +5,7 @@ import {
   TodoDraft, dayOf, dateOfDay, dayLabel, parseDay, starsText, ruleLabel, draftError, createTodo,
   editTodo, completeTodo as completeTodoLogic, reconcile, pendingTodos, saveDiary, clonePlanner
 } from '../logic/planner.js';
+import { weekStart, completeYesterday, canCorrectYesterday, correctYesterday } from '../planner-extra.js';
 
 const WEEKDAY_NAMES = ['一', '二', '三', '四', '五', '六', '日'];
 const REPEATS = [['once', '单次'], ['daily', '每天'], ['weekly', '每周'], ['interval', '每隔 N 天']];
@@ -16,7 +17,10 @@ const ui = {
   diaryDay: dayOf(new Date()),
   /** null 表示尚未从数据加载 */
   diaryBody: null,
-  diarySaved: ''
+  diarySaved: '',
+  week: weekStart(dayOf(new Date())),
+  weekBody: null,
+  weekSaved: ''
 };
 
 // ---------------------------------------------------------------- 待办操作
@@ -333,10 +337,66 @@ function persistDiary(message = '日记已保存') {
 
 /** 切换日期/标签前自动保存未保存的日记，避免丢字；保存失败返回 false 以阻止离开 */
 export function flushDiaryIfDirty() {
-  if (!diaryDirty()) {
-    return true;
+  if (diaryDirty() && !persistDiary('日记已自动保存')) return false;
+  if (ui.weekBody !== null && ui.weekBody !== ui.weekSaved) return persistWeek('周记已自动保存');
+  return true;
+}
+
+function loadWeek(week) {
+  const entry = (ctx.state.planner.weeklyNotes || []).find((item) => item.week === week);
+  ui.week = week;
+  ui.weekBody = entry ? entry.body : '';
+  ui.weekSaved = ui.weekBody;
+}
+
+function persistWeek(message = '周记已保存') {
+  const next = clonePlanner(ctx.state.planner);
+  if (!next.weeklyNotes) next.weeklyNotes = [];
+  const entry = next.weeklyNotes.find((item) => item.week === ui.week);
+  if (entry) {
+    entry.body = ui.weekBody;
+    entry.updatedAt = Date.now();
+  } else {
+    next.weeklyNotes.push({ week: ui.week, body: ui.weekBody, updatedAt: Date.now() });
   }
-  return persistDiary('日记已自动保存');
+  if (!ctx.commitPlanner(next, message, false)) return false;
+  ui.weekSaved = ui.weekBody;
+  return true;
+}
+
+function weekSegment(today) {
+  if (ui.weekBody === null) loadWeek(ui.week);
+  const go = (week) => {
+    if (!flushDiaryIfDirty()) return;
+    loadWeek(week);
+    ctx.rerender();
+  };
+  const area = h('textarea', {
+    class: 'textarea tall', placeholder: '写下这周要做的事……', 'aria-label': '本周记录',
+    onInput: (e) => { ui.weekBody = e.target.value; },
+    onBlur: () => { flushDiaryIfDirty(); }
+  });
+  area.value = ui.weekBody;
+  const notes = (ctx.state.planner.weeklyNotes || []).filter((item) => item.body.trim()).slice().sort((a, b) => b.week - a.week);
+  const first = dayLabel(ui.week);
+  const last = dayLabel(ui.week + 6);
+  const range = `${first} 至 ${first.slice(0, 4) === last.slice(0, 4) ? last.slice(5) : last}`;
+  return [
+    h('div', { class: 'diary-nav week-nav' },
+      h('button', { class: 'icon-btn', 'aria-label': '上一周', onClick: () => go(ui.week - 7) }, '‹'),
+      h('div', { class: 'mid' }, range, ui.week === weekStart(today) ? '（本周）' : ''),
+      h('button', { class: 'icon-btn', 'aria-label': '下一周', onClick: () => go(ui.week + 7) }, '›')),
+    h('div', { class: 'week-content' }, area),
+    h('div', { class: 'week-actions' },
+      ui.week !== weekStart(today) ? h('button', { class: 'btn', onClick: () => go(weekStart(today)) }, '回到本周') : null,
+      h('button', { class: 'btn primary grow', onClick: () => { if (persistWeek()) ctx.rerender(); } }, '保存周记')),
+    notes.length ? h('div', { class: 'section-title' }, '写过的周记') : null,
+    h('div', { class: 'list' }, notes.slice(0, 30).map((note) => h('button', {
+      class: 'row-btn', onClick: () => go(note.week)
+    }, h('div', { class: 'card history-row' },
+      h('div', { class: 'title' }, `${dayLabel(note.week)} 至 ${dayLabel(note.week + 6)}`),
+      h('div', { class: 'muted small ellipsis' }, note.body.trim().split('\n')[0])))))
+  ];
 }
 
 // ---------------------------------------------------------------- 视图
@@ -362,7 +422,31 @@ function todoCard(todo, today) {
       h('div', { class: `due${todo.nextDay < today ? ' late' : ''}` },
         h('span', { class: 'stars' }, starsText(todo.stars)), ` · ${ruleLabel(todo)}`),
       h('div', { class: `due${todo.nextDay < today ? ' late' : ''}` }, dueLabel(todo, today))));
-  return row;
+  if (todo.nextDay > today - 1) return row;
+  const more = h('button', { class: 'todo-more', 'aria-label': `${todo.title} 更多操作`, 'aria-expanded': false }, '⋯');
+  const action = h('button', { class: 'btn soft todo-yesterday', onClick: () => {
+    const next = clonePlanner(ctx.state.planner);
+    if (completeYesterday(next, todo.id, dayOf(new Date()))) ctx.commitPlanner(next, '已记为昨天完成');
+    else ctx.rerender();
+  } }, '昨天完成');
+  const actions = h('div', { class: 'todo-actions', hidden: true }, action);
+  const wrap = h('div', { class: 'todo-swipe' }, row, actions);
+  const toggle = (open) => {
+    wrap.classList.toggle('is-open', open);
+    actions.hidden = !open;
+    more.setAttribute('aria-expanded', String(open));
+  };
+  more.addEventListener('click', () => toggle(!wrap.classList.contains('is-open')));
+  row.appendChild(more);
+  let startX = 0;
+  let startY = 0;
+  row.addEventListener('touchstart', (event) => { startX = event.touches[0].clientX; startY = event.touches[0].clientY; }, { passive: true });
+  row.addEventListener('touchend', (event) => {
+    const dx = event.changedTouches[0].clientX - startX;
+    const dy = event.changedTouches[0].clientY - startY;
+    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.5) toggle(dx < 0);
+  }, { passive: true });
+  return wrap;
 }
 
 function todoSegment(today) {
@@ -416,7 +500,13 @@ function historySegment() {
         h('span', { class: 'title ellipsis grow' }, r.title),
         h('span', { class: 'stars' }, starsText(r.stars))),
       h('div', { class: 'muted small', style: { marginTop: '4px' } },
-        `${r.rule} · 原定 ${dayLabel(r.dueDay)}${r.overdueDays > 0 ? ` · 晚了 ${r.overdueDays} 天` : ''} · 记于 ${dayLabel(r.recordedDay)}`)))),
+        `${r.rule} · 原定 ${dayLabel(r.dueDay)}${r.overdueDays > 0 ? ` · 晚了 ${r.overdueDays} 天` : ''} · 记于 ${dayLabel(r.recordedDay)}`),
+      canCorrectYesterday(ctx.state.planner, r, dayOf(new Date())) ? h('button', {
+        class: 'btn soft history-correct', onClick: () => {
+          const next = clonePlanner(ctx.state.planner);
+          if (correctYesterday(next, r.id, dayOf(new Date()))) ctx.commitPlanner(next, '已更正为昨天完成');
+        }
+      }, '更正为昨天完成') : null))),
     rows.length > ui.historyLimit ? h('div', { style: { marginTop: '12px' } },
       h('button', { class: 'btn block', onClick: () => { ui.historyLimit += 50; ctx.rerender(); } },
         `显示更多（还有 ${rows.length - ui.historyLimit} 条）`)) : null
@@ -460,12 +550,14 @@ function diarySegment(today) {
 
 export function renderPlanner() {
   const today = dayOf(new Date());
-  const segs = [['todo', '待办'], ['schedule', '日程'], ['diary', '日记'], ['history', '记录']];
+  const segs = [['todo', '待办'], ['schedule', '日程'], ['diary', '日记'], ['week', '周记'], ['history', '记录']];
   let content;
   if (ui.seg === 'schedule') {
     content = scheduleSegment();
   } else if (ui.seg === 'diary') {
     content = diarySegment(today);
+  } else if (ui.seg === 'week') {
+    content = weekSegment(today);
   } else if (ui.seg === 'history') {
     content = historySegment();
   } else {
@@ -491,5 +583,7 @@ export function renderPlanner() {
 export function notifyDataReplaced() {
   ui.diaryBody = null;
   ui.diaryDay = dayOf(new Date());
+  ui.weekBody = null;
+  ui.week = weekStart(dayOf(new Date()));
 }
 

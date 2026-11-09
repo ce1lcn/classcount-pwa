@@ -17,6 +17,16 @@
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
   --radius: 16px;
+  --touch-size: 44px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --spring: cubic-bezier(.2, 1.35, .35, 1);
+  --spring-time: 320ms;
+  --spring-offset: 8px;
+  --spring-start-scale: .98;
+  --press-scale: .95;
+  --more-size: 22px;
+  --week-label-size: 14px;
 }
 
 * { box-sizing: border-box; }
@@ -108,11 +118,27 @@ h1, h2, h3, p { margin: 0; }
 .progress i { display: block; height: 100%; background: #fff; border-radius: 3px; }
 
 .todo { display: flex; gap: 12px; align-items: center; padding: 10px 12px; }
+.todo-swipe { min-width: 0; }
+.todo-swipe.is-open .todo { transform: translateX(calc(-1 * var(--spring-offset))); }
+.todo-more { width: var(--touch-size); height: var(--touch-size); flex: none; border: 0; border-radius: var(--radius); background: transparent; color: var(--sub); font-size: var(--more-size); transition: transform var(--spring-time) var(--spring), background-color var(--spring-time); }
+.todo-more:active { transform: scale(var(--press-scale)); background: var(--primary-soft); }
+.todo-actions { display: flex; justify-content: flex-end; padding: var(--space-sm) var(--space-sm) 0; }
+.todo-actions[hidden] { display: none; }
+.todo-swipe.is-open .todo-actions { animation: spring-reveal var(--spring-time) var(--spring) both; }
+.todo-yesterday:active { transform: scale(var(--press-scale)); }
+.week-nav .icon-btn { width: var(--touch-size); height: var(--touch-size); flex: none; }
+.week-nav .mid { font-size: var(--week-label-size); }
+.week-content { animation: spring-reveal var(--spring-time) var(--spring) both; }
+.week-actions { display: flex; gap: var(--space-sm); margin-top: var(--space-md); }
+.history-correct { margin-top: var(--space-sm); }
+@keyframes spring-reveal { from { opacity: 0; transform: translateY(var(--spring-offset)) scale(var(--spring-start-scale)); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .check {
   width: 28px; height: 28px; flex: none; border-radius: 50%;
   border: 2px solid var(--mute); background: none; padding: 0;
   display: inline-flex; align-items: center; justify-content: center; color: #fff;
 }
+.todo .check { position: relative; }
+.todo .check::before { content: ''; position: absolute; width: var(--touch-size); height: var(--touch-size); left: 50%; top: 50%; transform: translate(-50%, -50%); }
 .check:active { background: var(--primary-soft); border-color: var(--primary); }
 .check.disabled { opacity: .4; }
 .stars { color: var(--accent); letter-spacing: 1px; font-size: 13px; }
@@ -184,8 +210,9 @@ h1, h2, h3, p { margin: 0; }
 
 /* ---------- 手账 ---------- */
 .segment { display: flex; padding: 3px; border-radius: 12px; background: #ECE5D9; margin-bottom: 14px; }
-.segment button { flex: 1; min-height: 36px; border: 0; border-radius: 10px; background: none; color: var(--sub); font-weight: 600; font-size: 14px; }
+.segment button { flex: 1; min-height: var(--touch-size); border: 0; border-radius: 10px; background: none; color: var(--sub); font-weight: 600; font-size: 14px; }
 .segment button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(43,38,34,.12); }
+.segment button:active { transform: scale(var(--press-scale)); }
 .fab {
   position: absolute; right: 18px; bottom: calc(var(--tab-h) + var(--safe-b) + 16px); z-index: 5;
   width: 56px; height: 56px; border-radius: 50%; border: 0;
@@ -294,6 +321,7 @@ body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none
 .todo.completing .check { background: var(--primary); border-color: var(--primary); }
 .todo.completing .check svg { opacity: 1; transform: scale(1); }
 .todo { transition: opacity .25s ease-in .12s, transform .28s ease-in .12s; }
+.todo-swipe .todo { transition: opacity var(--spring-time), transform var(--spring-time) var(--spring); }
 .todo.completing { opacity: 0; transform: translateX(28px); pointer-events: none; }
 
 .empty-done { display: flex; flex-direction: column; align-items: center; gap: 8px; }

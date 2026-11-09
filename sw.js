@@ -3,7 +3,7 @@
  * 缓存名带版本号；升级时新版本安装完整预缓存后接管，并清理旧缓存。
  * 版本号需与 js/version.js 一致（test/pwa.mjs 会校验）。
  */
-const VERSION = '1.1.1';
+const VERSION = '1.1.3';
 const CACHE = `classcount-${VERSION}`;
 const PRECACHE = [
   './',
@@ -17,6 +17,7 @@ const PRECACHE = [
   'js/ctx.js',
   'js/dom.js',
   'js/store.js',
+  'js/planner-extra.js',
   'js/version.js',
   'js/logic/course.js',
   'js/logic/schedule.js',
